@@ -36,6 +36,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 test_batch_size = 128
 
+if not os.path.exists("preds"):
+    os.mkdir("preds")
+
 # graph_cache = args.graph_cach_path.format(
 #     args.negative_sample, 
 #     args.load_edge_types, 

@@ -10,7 +10,9 @@ from itertools import chain
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 
-def eval(data_loader, model, test_batch_size, criterion, mode="test"):
+MAX_SEQ_LENGTH=30
+
+def eval(data_loader, model, test_batch_size, criterion, mode="test", metric="acc"):
     loss = 0
     correct_num = 0
     total_num = 0
@@ -49,7 +51,11 @@ def eval(data_loader, model, test_batch_size, criterion, mode="test"):
     FP = total_num - correct_num - FN
     P = TP / (TP+FP)
     # return 2*P*R/(P+R), correct_pos/total_pos
-    return correct_num / total_num, correct_pos/total_pos
+
+    if metric == "acc":
+        return correct_num / total_num, correct_pos/total_pos
+    elif metric == "f1":
+        return 2*P*R/(P+R), correct_pos/total_pos
 
 class LinkPrediction(nn.Module):
     def __init__(self, encoder, adj_lists, nodes_tokenized, device, num_layers=1,num_neighbor_samples=10):
@@ -199,9 +205,13 @@ class GraphSage(nn.Module):
         all_nodes = np.unique([int(n) for n in list(chain(*[layer[0] for layer in nodes_batch_layers]))])
         all_nodes_idx = dict([(node, idx) for idx, node in enumerate(all_nodes) ])
 
+
+        all_neigh_nodes = pad_sequence([self.nodes_tokenized[node ] for node in all_nodes], padding_value=1).transpose(0, 1)[:, :MAX_SEQ_LENGTH].to(self.device)
+
         pre_hidden_embs = self.get_roberta_embs(
-            pad_sequence([self.nodes_tokenized[node ] for node in all_nodes], padding_value=1).transpose(0, 1).to(self.device)
+            all_neigh_nodes
         )
+
         # (num_all_node, emb_size)
 
         for layer_idx in range(1, self.num_layers+1):

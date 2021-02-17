@@ -13,6 +13,9 @@ from itertools import chain
 from transformers import BertTokenizer, RobertaTokenizer
 from tqdm import tqdm
 
+MAX_NODE_LENGTH=10
+# for xWant ,neg_prop=4, all_in_aser, when this equals 10, filter out 0.6%. when 11, filter out 0.1%.
+
 
 np.random.seed(229)
 
@@ -32,15 +35,15 @@ class InferenceGraphDataset():
 
         self.data_id["head"] = np.array([[self.training_graph.node2id[head], 
             self.training_graph.node2id[tail], hid] for head, tail, hid in self.data["head"] \
-            if len(head) < 150 and len(tail) < 150]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
 
         self.data_id["tail"] = np.array([[self.training_graph.node2id[head], 
             self.training_graph.node2id[tail], -1] for head, tail in self.data["tail"] \
-            if len(head) < 150 and len(tail) < 150]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
 
         self.data_id["new"] = np.array([[self.training_graph.node2id[head], 
             self.training_graph.node2id[tail], -1] for head, tail in self.data["new"] \
-            if len(head) < 150 and len(tail) < 150]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH]) # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
 
     def get_nodes_tokenized(self):
         return self.training_graph.get_nodes_tokenized()
@@ -59,11 +62,14 @@ class InferenceSimpleDataset():
         self.data_id = {}
 
         self.data_id["head"] = np.array([[self.training_graph.node2id[head], 
-            self.training_graph.node2id[tail], hid] for head, tail, hid in self.data["head"] ]) 
+            self.training_graph.node2id[tail], hid] for head, tail, hid in self.data["head"] \
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH ]) 
         self.data_id["tail"] = np.array([[self.training_graph.node2id[head], 
-            self.training_graph.node2id[tail], -1] for head, tail in self.data["tail"] ]) 
+            self.training_graph.node2id[tail], -1] for head, tail in self.data["tail"] \
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH ]) 
         self.data_id["new"] = np.array([[self.training_graph.node2id[head], 
-            self.training_graph.node2id[tail], -1] for head, tail in self.data["new"] ]) 
+            self.training_graph.node2id[tail], -1] for head, tail in self.data["new"] \
+            if len(head.split()) < MAX_NODE_LENGTH and len(tail.split()) < MAX_NODE_LENGTH ]) 
 
             # if (self.training_graph.node2id[head], self.training_graph.node2id[tail]) not in train_edges
     def get_nodes_tokenized(self):
@@ -81,8 +87,9 @@ class GraphDataset():
         max_train_num=1000000,
         load_edge_types="ATOMIC",
         negative_sample="fix_head",
-        atomic_csv_path="v4_atomic_all_agg.csv",
-        random_split=False,):
+        atomic_csv_path="/home/tfangaa/Downloads/ATOMIC/v4_atomic_all_agg.csv",
+        random_split=False,
+        neg_prop=1.0):
         assert load_edge_types in ["ATOMIC", "ASER", "ATOMIC+ASER"], \
             "should be in [\"ATOMIC\", \"ASER\", \"ATOMIC+ASER\"]"
 
@@ -101,7 +108,7 @@ class GraphDataset():
 
         filter_nodes = []
         for node in G.nodes():
-            if len(node) > 150: # filter extra large nodes
+            if len(node.split()) > MAX_NODE_LENGTH: # filter extra large nodes
                 filter_nodes.append(node)
         print("num of removing nodes:", len(filter_nodes))                
         G.remove_nodes_from(filter_nodes)
@@ -155,7 +162,8 @@ class GraphDataset():
             all_heads = [self.node2id[node] for node, out_degree in G.out_degree if out_degree>0]
             all_tails = [self.node2id[node] for node, out_degree in G.out_degree if out_degree==0]
             neg_edges = []
-            for i in range(len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos) ):
+            num_neg = len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos)
+            for i in range( int(num_neg * neg_prop) ):
                 hd_idx = np.random.randint(0, len(all_heads))
                 tl_idx = np.random.randint(0, len(all_tails))
                 while (all_heads[hd_idx], all_tails[tl_idx]) in edge_dict:
@@ -164,7 +172,8 @@ class GraphDataset():
                 neg_edges.append([all_heads[hd_idx], all_tails[tl_idx]])
         elif negative_sample == "from_all":
             neg_edges = []
-            for i in range(len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos) ):
+            num_neg = len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos)
+            for i in range( int(num_neg * neg_prop) ):
                 rnd = np.random.randint(0, len(self.node2id), 2)
                 tmp_edge = (rnd[0], rnd[1])
                 while tmp_edge in edge_dict or tmp_edge[0] == tmp_edge[1]:
@@ -181,24 +190,25 @@ class GraphDataset():
                 for head, tail, feat in G.edges.data() if feat["relation"]=="neg_tst"]
             print("num of prepared neg for train:{}, dev:{}, test:{}".format(len(neg_train), len(neg_val), len(neg_test)))
             neg_edges = []
-            for i in range(len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos)\
-               - len(neg_train) - len(neg_val) - len(neg_test) ):
+            num_neg = len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos)
+            for i in range(int(num_neg * neg_prop) - len(neg_train) - len(neg_val) - len(neg_test) ):
                 rnd = np.random.randint(0, len(self.node2id), 2)
                 tmp_edge = (rnd[0], rnd[1])
                 while tmp_edge in edge_dict or tmp_edge[0] == tmp_edge[1]:
                     rnd = np.random.randint(0, len(self.node2id), 2)
                     tmp_edge = (rnd[0], rnd[1])
                 neg_edges.append(list(tmp_edge))
-            trn_val_idx = len(train_edges_pos)-len(neg_train)
-            val_tst_idx = trn_val_idx+len(val_edges_pos)-len(neg_val)
+            trn_val_idx = int(len(train_edges_pos)*neg_prop) - len(neg_train)
+            val_tst_idx = trn_val_idx + int(len(val_edges_pos)*neg_prop)-len(neg_val)
             neg_edges = neg_train + neg_edges[:trn_val_idx]\
                        +neg_val + neg_edges[trn_val_idx:val_tst_idx]\
                        +neg_test + neg_edges[val_tst_idx:]
-            assert len(neg_edges) == len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos)
+            assert len(neg_edges) == int((len(train_edges_pos) + len(val_edges_pos) + len(test_edges_pos))*neg_prop)
 
-        train_edges_neg = neg_edges[:len(train_edges_pos)]
-        val_edges_neg = neg_edges[len(train_edges_pos):len(train_edges_pos) + len(val_edges_pos)]
-        test_edges_neg = neg_edges[len(train_edges_pos) + len(val_edges_pos):]
+        train_edges_neg = neg_edges[:int(len(train_edges_pos)*neg_prop)]
+        val_edges_neg = neg_edges[int(len(train_edges_pos)*neg_prop):int((len(train_edges_pos)+len(val_edges_pos))*neg_prop)]
+        test_edges_neg = neg_edges[int((len(train_edges_pos)+len(val_edges_pos))*neg_prop):]
+        print('Number of negative examples after trucating:{}, validating:{}, testing:{}'.format(len(train_edges_neg), len(val_edges_neg), len(test_edges_neg)))
 
         self.train_labels = np.array([0] * len(train_edges_neg) + [1] * len(train_edges_pos))
         self.train_edges = np.array(train_edges_neg + train_edges_pos)

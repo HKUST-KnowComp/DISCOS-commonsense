@@ -30,14 +30,14 @@ parser.add_argument("--test_every", default=250, type=int, required=False,
                     help="show test result every x steps")
 parser.add_argument("--batch_size", default=64, type=int, required=False,
                     help="batch size")
-parser.add_argument("--epochs", default=10, type=int, required=False,
+parser.add_argument("--epochs", default=3, type=int, required=False,
                     help="batch size")
 parser.add_argument("--num_neighbor_samples", default=4, type=int, required=False,
                     help="num neighbor samples in GraphSAGE")
 parser.add_argument("--load_edge_types", default='ATOMIC', type=str, required=False,
                     choices=["ATOMIC", "ASER", "ATOMIC+ASER"],
                     help="load what edges to data_loader.adj_lists")
-parser.add_argument("--graph_cach_path", default="graph_cache/neg_{}_{}_{}.pickle", 
+parser.add_argument("--graph_cach_path", default="graph_cache/neg_{}_{}_{}_{}.pickle", 
                     type=str, required=False,
                     help="path of graph cache")
 parser.add_argument("--optimizer", default='SGD', type=str, required=False,
@@ -48,6 +48,11 @@ parser.add_argument("--negative_sample", default='from_all', type=str, required=
                     help="nagative sample methods")
 parser.add_argument("--file_path", default='', type=str, required=True,
                     help="load training graph pickle")
+parser.add_argument("--metric", default='acc', type=str, required=False,
+                    choices=["f1", "acc"],
+                    help="evaluation metric, either f1 or acc")
+parser.add_argument("--neg_prop", default=1.0, type=float, required=False,
+                    help="the proportion of negative sample: num_neg/num_pos")
 
 args = parser.parse_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -57,26 +62,31 @@ batch_size= args.batch_size
 num_epochs = args.epochs
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 test_batch_size = 64
+neg_prop = args.neg_prop
 
 file_path = args.file_path
 
 graph_cache = args.graph_cach_path.format(args.negative_sample, args.load_edge_types, os.path.basename(file_path).split(".")[0])
+if not os.path.exists("models"):
+    os.mkdir("models")
 model_dir = "models/"+os.path.basename(file_path).split(".")[0]
 if not os.path.exists(model_dir):
     os.mkdir(model_dir)
 if args.model == "simple":
-    model_save_path = os.path.join(model_dir, '{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}.pth'\
+    model_save_path = os.path.join(model_dir, '{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_{}.pth'\
     .format(args.model, args.encoder, batch_size, args.optimizer, 
-        args.lr, args.lrdecay, args.decay_every))
+        args.lr, args.lrdecay, args.decay_every, args.metric))
 elif args.model == "graphsage":
-    model_save_path = os.path.join(model_dir, '{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}.pth'\
+    model_save_path = os.path.join(model_dir, '{}_best_{}_bs{}_opt_{}_lr{}_decay{}_{}_layer{}_neighnum_{}_graph_{}_{}.pth'\
                         .format(args.model, args.encoder, batch_size, args.optimizer, args.lr, 
                             args.lrdecay, args.decay_every, args.num_layers, 
-                            args.num_neighbor_samples, args.load_edge_types))
+                            args.num_neighbor_samples, args.load_edge_types, args.metric))
 
+print(graph_cache)
 if not os.path.exists(graph_cache):
     data_loader = GraphDataset(file_path, device, args.encoder, 
-        negative_sample=args.negative_sample, load_edge_types=args.load_edge_types)
+        negative_sample=args.negative_sample, load_edge_types=args.load_edge_types,
+        neg_prop=neg_prop)
     with open(graph_cache, "wb") as writer:
         pickle.dump(data_loader,writer,pickle.HIGHEST_PROTOCOL)  
     print("after dumping graph cache to", graph_cache)
@@ -130,20 +140,18 @@ for epoch in range(num_epochs):
         b_s, _ = edges.shape # batch_size, 2
         all_nodes = edges.reshape([-1])
 
-        
         logits = model(all_nodes, b_s)
         loss = criterion(logits, labels)
 
         loss.backward()
-        # nn.utils.clip_grad_norm_(model.parameters(), 5)
         optimizer.step()
         optimizer.zero_grad()
         model.zero_grad()
 
         # evaluate
         if step % show_step == 0:
-            val_acc, val_pos_acc = eval(data_loader, model, test_batch_size, criterion, "valid")
-            test_acc, test_pos_acc = eval(data_loader, model, test_batch_size, criterion, "test")
+            val_acc, val_pos_acc = eval(data_loader, model, test_batch_size, criterion, "valid", args.metric)
+            test_acc, test_pos_acc = eval(data_loader, model, test_batch_size, criterion, "test", args.metric)
             if val_acc > best_valid_acc:
                 best_valid_acc = val_acc
                 best_test_acc = test_acc
@@ -152,8 +160,8 @@ for epoch in range(num_epochs):
                 
                 torch.save(model.state_dict(), model_save_path)
                 
-            print("epoch {}, step {}, current valid acc: {},"
-                  "current test acc: {}, curret valid pos acc:{},"
-                  " current test pos acc: {},".format(epoch, step, val_acc, test_acc, val_pos_acc, test_pos_acc))
-            print("current best val acc: {}, test acc: {}"
-                  "current best val pos acc: {}, test acc: {}".format(best_valid_acc, best_test_acc, best_valid_pos_acc, best_test_pos_acc))
+            print(args.metric, ": epoch {}, step {}, current valid: {},"
+                  "current test: {}, curret valid pos:{},"
+                  " current test pos: {},".format(epoch, step, val_acc, test_acc, val_pos_acc, test_pos_acc))
+            print(args.metric, ": current best val: {}, test: {}"
+                  "current best val pos: {}, test: {}".format(best_valid_acc, best_test_acc, best_valid_pos_acc, best_test_pos_acc))

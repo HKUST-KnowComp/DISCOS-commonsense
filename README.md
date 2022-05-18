@@ -2,6 +2,8 @@
 
 This is the github repo for The Web Conference (WWW) 2021 paper [DISCOS: Bridging the Gap between Discourse Knowledge and Commonsense Knowledge](https://arxiv.org/abs/2101.00154).
 
+Check out the follow-up work, a benchmark that evaluates the performance of transforming discourse knowledge to commonsense knowledge: [(EMNLP 2021, CSKB Population) Benchmarking Commonsense Knowledge Base Population with an Effective Evaluation Dataset](https://arxiv.org/abs/2109.07679), [code](https://github.com/HKUST-KnowComp/CSKB-Population).
+
 ### How to train the Commonsense Knowledge Graph Population (CKGP) model
 
 Here is the instruction for learning the CKGP model. We use the filtered graph as introduced in Section 5.1.1 for this experiment.
